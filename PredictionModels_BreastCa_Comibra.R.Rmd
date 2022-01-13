@@ -1,0 +1,438 @@
+---
+title: "BS845_Final-Project"
+author: "Janvee Patel"
+date: "11/20/2021"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data Source
+Data and Paper Citation: Patr´ıcio, M., Pereira, J., Cris´ostomo, J., Matafome, P., Gomes, M., Sei¸ca,
+R., & Caramelo, F. (2018). Using Resistin, glucose, age and BMI to predict the presence of breast cancer.
+BMC Cancer, 18(1), 29. https://doi.org/10.1186/s12885-017-3877-1
+
+Additional Relevant Paper: Cris´ostomo, J., Matafome, P., Santos-Silva, D., Gomes, A. L., Gomes,
+M., Patr´ıcio, M., Letra, L., Sarmento-Ribeiro, A. B., Santos, L., & Sei¸ca, R. (2016). Hyperresistinemia and metabolic dysregulation: A risky crosstalk in obese breast cancer. Endocrine, 53(2), 433–442.
+https://doi.org/10.1007/s12020-016-0893-x
+
+Data was supplied by the UCI Machine Learning Repository
+
+
+Data and Project Background: 
+
+Patricio et al. (2018) implemented 3 machine learning algorithms to assess the efficacy of routine blood measurements to be used as potential biomarkers for additional breast cancer screening. In this project, the goals are to perform exploratory data analysis of the features, feature selection, implement five machine learning algorithms, assess model performances with AUC/ROC, sensitivity, specificity, and assess performance of a stacked model using the CARET R package (Classification and Regression Training).
+
+
+# Exploratory Data Analysis and Visualization of Variables
+
+```{r}
+
+#read in the dataset file
+breastca_ds <- read.csv("dataR2_UCI_ML_BreastCa_Coimbra.csv")
+
+#look at the variable types - all 9 attributes are quantitative
+str(breastca_ds)
+
+#there are no missing values to account for in this dataset
+sum(is.na(breastca_ds))
+
+#converted the Classification variable to a factor variable with 2 levels
+#1 = healthy controls (n = 52)
+#2 = breast cancer patients (n = 64)
+breastca_ds$Classification <- factor(breastca_ds$Classification, labels = c("HealthyControl", "BreastCancer"))
+
+#perform univariate analysis of each of the attributes first to visualize their patterns
+#test each attribute's normality
+#used Shapiro-Wilk as similar method to the paper- pval > 0.05 = normal ; pval < 0.05 = don't assume normal distribution
+#subset the dataset into the healthy controls and breast cancer to make the process easier then combine results
+healthycontrol_sub <- subset(breastca_ds, breastca_ds$Classification=="HealthyControl")
+breastcancer_sub <- subset(breastca_ds, breastca_ds$Classification=="BreastCancer")
+
+check_normality <- function(tmpattr) {
+  tmpnormality = shapiro.test(tmpattr)$p.value
+}
+
+healthycontrol_normality <- unlist(lapply(healthycontrol_sub[-10], check_normality))
+breastcancer_normality <- unlist(lapply(breastcancer_sub[-10], check_normality))
+normality_table <- cbind(healthycontrol_normality, breastcancer_normality)
+#all did not meet normality except for BMI (breast cancer) and Glucose (healthy control)
+
+#perform 2-sample Mann Whitney Test for each of the attributes
+wilcox_results <- lapply(breastca_ds[-10], FUN=function(tmpattr) {
+  tmp = wilcox.test(tmpattr ~ Classification, data = breastca_ds)[3]
+})
+
+wilcox_res <- data.frame(unlist(wilcox_results))
+
+#summary statistics by classification group
+library(doBy)
+
+perform_summary <- function(tmpattr) {
+  summaryBy(formula(paste(tmpattr, "~ Classification")), breastca_ds, FUN = c(mean, median))
+}
+
+summary_results <- lapply(names(breastca_ds)[-10], perform_summary)
+
+
+#box plots of all 9 attributes split by the Classification variable (Healthy Controls and Breast Cancer)
+library(ggplot2)
+library(ggpubr) #this is for ggarrange
+
+attributelist <- names(breastca_ds)[-10]
+
+boxplots_attributes <- lapply(attributelist, FUN = function(attributelist) {
+  ggplot(breastca_ds, mapping=aes_string(x="Classification", y=attributelist, fill="Classification")) + geom_boxplot() + geom_jitter() + scale_fill_manual(values=c("#1B9E77", "#7570B3"))
+})
+
+png("boxplots_attributes.png", width=1000, height=1000)
+plt1 <- ggarrange(plotlist = boxplots_attributes, ncol=3, nrow=3, common.legend=TRUE, legend="bottom", labels="auto")
+annotate_figure(plt1, top = text_grob("Boxplots of 9 Quantitative Attributes by Classification\n", size = 24, face = "bold"))
+
+#density plots using CARET package
+library(AppliedPredictiveModeling)
+library(caret)
+library(randomForest)
+png("density_plot.png", width=700)
+transparentTheme(trans = .7)
+featurePlot(x = breastca_ds[-10], y = breastca_ds$Classification, plot = "density", strip=strip.custom(par.strip.text=list(cex=.8)), scales = list(x = list(relation="free"), y = list(relation="free")), adjust=1.5, layout=c(3,3), auto.key=list(columns=2), )
+
+#generate scatter plot matrix of 9 attributes colored by the Classification variable to look for correlations between the features
+#code adapted from RDocumentation for pairs: ScatterPlot Matrices Help Page 
+panel.cor <- function(x, y, digits = 2, prefix = "", cex.cor, ...)
+{
+    usr <- par("usr"); on.exit(par(usr))
+    par(usr = c(0, 1, 0, 1))
+    r <- abs(cor(x, y))
+    txt <- format(c(r, 0.123456789), digits = digits)[1]
+    txt <- paste0(prefix, txt)
+    if(missing(cex.cor)) cex.cor <- 0.8/strwidth(txt)
+    text(0.5, 0.5, txt, cex = 3)
+}
+
+colrs <- c(nrow(breastca_ds))
+colrs[breastca_ds$Classification == "HealthyControl"] <- "#1B9E77" ; colrs[breastca_ds$Classification == "BreastCancer"] <- "#7570B3"
+png("scatterplotmatrix_attributes.png", width=1500, height=1500)
+pairs(breastca_ds[-10], pch=14, col = colrs, main="Scatter Plot Matrix of all 9 Attributes", cex.main = 2.75, cex.axis=2, panel=panel.smooth, lower.panel = panel.cor, oma=c(3,3,7,27))
+par(xpd=TRUE)
+legend("right", fill = unique(colrs), legend = c(levels(breastca_ds$Classification)), cex=1.75, bty="n", title="Classification")
+
+#fit a logistic regression model (glm) to multicollinearity
+#have a reason to believe that insulin and HOMA are highly correlated because these two blood measurements are very related as HOMA tests for insulin resistance
+library(car)
+gmod1 <- glm(Classification~., data=breastca_ds, family=binomial)
+vif(gmod1)
+summary(gmod1)
+#as expected the VIF for insulin and HOMA are very high
+
+#removed HOMA to see if it helps with VIF
+gmod2 <- glm(Classification~., data=breastca_ds[-5], family=binomial)
+vif(gmod2)
+summary(gmod2)
+#insulin VIF decreased and now all VIF in ideal range
+
+#however I made the decision to not remove HOMA because I wanted to include both attributes in the feature selection process in next section and in the process of model predictions
+#computed odds ratio and 95% CI
+glmres <-cbind(exp(coef(gmod1)), exp(confint(gmod1)))
+colnames(glmres) <-c("Odds Ratios","95% CI LL","95% CI UL")
+glmres <- round(glmres, 4)
+write.table(glmres, file = "glmres.csv", sep = ",", col.names = NA)
+
+```
+
+
+
+# Feature Selection
+```{r}
+#Use CARET R Package for feature selection
+library(caret)
+library(randomForest)
+
+#perform data partition and generate training and testing datasets (70:30 due to smaller dataset size)
+set.seed(100)
+trainValues <- createDataPartition(breastca_ds$Classification, p = 0.7, list = FALSE)
+trainingdata <- breastca_ds[trainValues, ]
+testingdata <- breastca_ds[-trainValues, ]
+
+#pre-processing on the data because units have different ranges so that the variables range from 0 to 1
+#will do the same pre-processing on the testing data in later section
+range_mod <- preProcess(trainingdata, method = "range")
+trainingdata <- predict(range_mod, newdata = trainingdata)
+
+#feature selection (RFE - recursive feature elimination)
+#10 fold cross validation with 5 repeats
+controlfs <- rfeControl(functions= rfFuncs, method="repeatedcv", repeats = 5, number = 10)
+rfe_results <- rfe(x = trainingdata[-10], y = trainingdata$Classification, sizes = c(1:9), rfeControl = controlfs)
+rfe_results
+predictors(rfe_results) #top selected features
+
+#feature selection plot
+png("feature_selection.png", width=700)
+ggplot(data = rfe_results, metric = "Accuracy") + labs(x="Number of Variables", title="Recursive Feature Elimination with Cross-Validation") + theme(plot.title = element_text(hjust = 0.5)) + scale_x_continuous(breaks=seq(1,10,by=1)) + theme(plot.title = element_text(face = "bold"), panel.grid.minor.x = element_blank())
+
+#variable importance plot
+library(RColorBrewer)
+varimp <- data.frame(feature=row.names(varImp(rfe_results)[,0]), importance=varImp(rfe_results)[,1])
+png("variable_importance.png", width=700)
+ggplot(data = varimp, aes(x = reorder(feature, -importance), y = importance, fill = feature)) + geom_bar(stat="identity") + labs(x = "Features", y = "Variable Importance", title="Variable Importance of the Predictors", fill="Features") + scale_fill_brewer(palette = "Dark2") + geom_text(aes(label=round(importance,3)), position=position_dodge(width=0.9), vjust=-0.25) + theme(plot.title = element_text(face = "bold", hjust=0.5))
+
+```
+
+
+
+# Implement and Test Prediction Models Using Cross Validation Approach
+```{r}
+#build (training data) models using 10-fold cross validation through CARET package and test models (testing data)
+#for each of 5 models, I trained the model on the subset of data with 5 top selected features and all 9 features
+
+#transformation of testing data to have numeric values between 0 and 1 like the training data
+testingdata <- predict(range_mod, testingdata)
+
+set.seed(100)
+ctrl <- trainControl(method="cv", number=10, savePredictions="final", classProbs=TRUE, summaryFunction=twoClassSummary)
+
+#RF (Random Forest)
+#5 Attributes
+set.seed(100)
+rf_mod5 <- train(Classification~., data=trainingdata[,c(1:3,5,8,10)], method="rf", tuneLength=5, metric="ROC", trControl=ctrl)
+rf_mod5
+rf5 <- plot(varImp(rf_mod5, scale=FALSE), main="Random Forest (5 Selected Features)", fontsize=16)
+
+#use the testing data for prediction
+predicted_rf_mod5 <- predict(rf_mod5, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_rf_mod5, mode="everything", positive="BreastCancer")
+prf5 <- predict(rf_mod5, testingdata, type="prob")
+
+#All 9 Attributes
+set.seed(100)
+rf_mod9 <- train(Classification~., data=trainingdata, method="rf", tuneLength=5, metric="ROC", trControl=ctrl)
+rf_mod9
+rf9 <- plot(varImp(rf_mod9, scale=FALSE), main="Random Forest (All 9 Features)", fontsize=16)
+
+#use the testing data for prediction
+predicted_rf_mod9 <- predict(rf_mod9, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_rf_mod9, mode="everything", positive="BreastCancer")
+prf9 <- predict(rf_mod9, testingdata, type="prob")
+
+
+#SVM (Support Vector Machine)
+#5 Attributes
+set.seed(100)
+svm_mod5 <- train(Classification~., data=trainingdata[,c(1:3,5,8,10)], method="svmRadial", tuneLength=10, metric="ROC", trControl=ctrl)
+svm_mod5
+svm5 <- plot(varImp(svm_mod5, scale=FALSE), main="Support Vector Machine (5 Selected Features)", fontsize=16)
+
+#use the testing data for prediction
+predicted_svm_mod5 <- predict(svm_mod5, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_svm_mod5, mode="everything", positive="BreastCancer")
+psvm5 <- predict(svm_mod5, testingdata, type="prob")
+
+#All 9 Attributes
+set.seed(100)
+svm_mod9 <- train(Classification~., data=trainingdata, method="svmRadial", tuneLength=10, metric="ROC", trControl=ctrl)
+svm_mod9
+svm9 <- plot(varImp(svm_mod9, scale=FALSE), main="Support Vector Machine (All 9 Features)", fontsize=16)
+
+#use the testing data for prediction
+predicted_svm_mod9 <- predict(svm_mod9, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_svm_mod9, mode="everything", positive="BreastCancer")
+psvm9 <- predict(svm_mod9, testingdata, type="prob")
+
+
+#LR (Logistic Regression)
+#5 Attributes
+set.seed(100)
+lr_mod5 <- train(Classification~., data=trainingdata[,c(1:3,5,8,10)], method="glm", family="binomial", tuneLength=5, metric="ROC", trControl=ctrl)
+lr_mod5
+summary(lr_mod5)
+lr5 <- plot(varImp(lr_mod5, scale=FALSE), main="Logistic Regression (5 Selected Features)", fontsize=16)
+
+#use testing data for prediction
+predicted_lr_mod5 <- predict(lr_mod5, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_lr_mod5, mode="everything", positive="BreastCancer")
+plr5 <- predict(lr_mod5, testingdata, type="prob")
+
+#9 Attributes
+set.seed(100)
+lr_mod9 <- train(Classification~., data=trainingdata, method="glm", family="binomial", tuneLength=5, metric="ROC", trControl=ctrl)
+lr_mod9
+summary(lr_mod9)
+lr9 <- plot(varImp(lr_mod5, scale=FALSE), main="Logistic Regression (All 9 Features)", fontsize=16)
+
+predicted_lr_mod9 <- predict(lr_mod9, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_lr_mod9, mode="everything", positive="BreastCancer")
+plr9 <- predict(lr_mod9, testingdata, type="prob")
+
+
+#KNN (K-Nearest Neighbors)
+#5 Attributes
+set.seed(100)
+knn_mod5 <- train(Classification~., data=trainingdata[,c(1:3,5,8,10)], method="knn", tuneLength=5, metric="ROC", trControl=ctrl)
+knn_mod5
+knn5 <- plot(varImp(knn_mod5, scale=FALSE), main="K Nearest Neighbors (5 Selected Features)", fontsize=16)
+
+#use testing data for prediction
+predicted_knn_mod5 <- predict(knn_mod5, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_knn_mod5, mode="everything", positive="BreastCancer")
+pknn5 <- predict(knn_mod5, testingdata, type="prob")
+
+#All 9 Attributes
+set.seed(100)
+knn_mod9 <- train(Classification~., data=trainingdata, method="knn", tuneLength=5, metric="ROC", trControl=ctrl)
+knn_mod9
+knn9 <- plot(varImp(knn_mod9, scale=FALSE), main="K Nearest Neighbors (All 9 Features)", fontsize=16)
+
+#use testing data for prediction
+predicted_knn_mod9 <- predict(knn_mod9, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_knn_mod9, mode="everything", positive="BreastCancer")
+pknn9 <- predict(knn_mod9, testingdata, type="prob")
+
+
+#AdaBoost (Adaptive Boosting)
+#5 Attributes
+set.seed(100)
+ab_mod5 <- train(Classification~., data=trainingdata[,c(1:3,5,8,10)], method="adaboost", tunelength=2, metric="ROC", trControl=ctrl)
+ab_mod5
+ab5 <- plot(varImp(ab_mod5, scale=FALSE), main="AdaBoost (5 Selected Features)", fontsize=16)
+
+#use testing data for prediction
+predicted_ab_mod5 <- predict(ab_mod5, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_ab_mod5, mode="everything", positive="BreastCancer")
+pab5 <- predict(ab_mod5, testingdata, type="prob")
+
+#All 9 Attributes
+set.seed(100)
+ab_mod9 <- train(Classification~., data=trainingdata, method="adaboost", tuneLength=2, metric="ROC", trControl=ctrl)
+ab_mod9
+ab9 <- plot(varImp(ab_mod9, scale=FALSE), main="AdaBoost (All 9 Features)", fontsize=16)
+
+#use testing data for prediction
+predicted_ab_mod9 <- predict(ab_mod9, testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_ab_mod9, mode="everything", positive="BreastCancer")
+pab9 <- predict(ab_mod9, testingdata, type="prob")
+
+
+#combine the variable importance plots
+plts <- list(rf5, rf9, svm5, svm9, lr5, lr9, knn5, knn9, ab5, ab9)
+png("model_varimp.png", width=4000, height=6000)
+plt2 <- ggarrange(plotlist = plts, ncol=2, nrow=5, labels="auto")
+annotate_figure(plt2, top = text_grob("Variable Importance Plots for the 5 Models by Number of Features\n", size = 52, face = "bold"))
+
+
+```
+
+
+
+# Assess Model Performances and Generate Visualizations
+```{r}
+#Compute AUC, Sensitivity, Specificity
+#to compare all the models against each other, I used CARET's resamples
+mod_comp <- resamples(list(RB5=rf_mod5, RF9=rf_mod9, SVM5=svm_mod5, SVM9=svm_mod9, LR5=lr_mod5, LR9=lr_mod9, KNN5=knn_mod5, KNN9=knn_mod9, AB5=ab_mod5, AB9=ab_mod9))
+mod_comp
+summary(mod_comp)
+
+#plot ROC, sensitivity, specificity distributions
+png("mod_comp.png", width=1000)
+bwplot(mod_comp, main="Box and Whisker Plots of Performance Metrics", scales=list(x=list(relation="free"),y=list(relation="free")), strip=strip.custom(par.strip.text=list(cex=1.4)))
+
+#doplot of ROC results from the resamples model comparison
+png("dotplot.png", width=700)
+trellis.par.set(caretTheme())
+dotplot(mod_comp, metric = "ROC", main="Dotplot of ROC Performance Metric")
+
+#plot ROC plots
+library(pROC)
+png("rf_roc.png")
+roc.rf5<-roc(testingdata$Classification~prf5$BreastCancer)
+roc.rf9 <- roc(testingdata$Classification~prf9$BreastCancer)
+plot(roc.rf5, col=1,cex.axis=1.3, main="ROC Curves for Random Forest")
+plot(roc.rf9,col=2, add=T)
+legend('bottomright', c("5 Features", "9 Features" ),col=1:2,lty=1, lwd=1.5,bty='n') 
+
+
+png("svm_roc.png")
+roc.svm5<-roc(testingdata$Classification~psvm5$BreastCancer)
+roc.svm9 <- roc(testingdata$Classification~psvm9$BreastCancer)
+plot(roc.svm5, col=1,cex.axis=1.3, main="ROC Curves for Support Vector Machine")
+plot(roc.svm9,col=2, add=T)
+legend('bottomright', c("5 Features", "9 Features" ),col=1:2,lty=1, lwd=1.5,bty='n') 
+
+
+png("lr_roc.png")
+roc.lr5<-roc(testingdata$Classification~plr5$BreastCancer)
+roc.lr9 <- roc(testingdata$Classification~plr9$BreastCancer)
+plot(roc.lr5, col=1,cex.axis=1.3, main="ROC Curves for Logistic Regression")
+plot(roc.lr9,col=2, add=T)
+legend('bottomright', c("5 Features", "9 Features" ),col=1:2,lty=1, lwd=1.5,bty='n') 
+
+
+png("knn_roc.png")
+roc.knn5<-roc(testingdata$Classification~pknn5$BreastCancer)
+roc.knn9 <- roc(testingdata$Classification~pknn9$BreastCancer)
+plot(roc.knn5, col=1,cex.axis=1.3, main="ROC Curves for K-Nearest Neighbors")
+plot(roc.knn9,col=2, add=T)
+legend('bottomright', c("5 Features", "9 Features" ),col=1:2,lty=1, lwd=1.5,bty='n') 
+
+
+png("ab_roc.png")
+roc.ab5<-roc(testingdata$Classification~pab5$BreastCancer)
+roc.ab9 <- roc(testingdata$Classification~pab9$BreastCancer)
+plot(roc.ab5, col=1,cex.axis=1.3, main="ROC Curves for Adaptive Boosting")
+plot(roc.ab9,col=2, add=T)
+legend('bottomright', c("5 Features", "9 Features" ),col=1:2,lty=1, lwd=1.5,bty='n') 
+
+```
+
+
+
+# Construct Stacked Machine Learning Model 
+```{r}
+#stack predictions from multiple models
+library(caretEnsemble)
+
+tcontrol <- trainControl(method="repeatedcv", number = 10, repeats=3, savePredictions = "final", classProbs = TRUE)
+mlalgorithms <- c('rf', 'svmRadial', 'glm', 'knn', 'adaboost')
+
+#ensemble predictions from multiple models and create stacked model using caretStack()
+#5 attributes
+set.seed(101)
+modls5 <- caretList(Classification~., data=trainingdata[,c(1:3,5,8,10)], trControl=tcontrol, methodList=mlalgorithms)
+res5 <- resamples(modls5)
+summary(res5)
+png("bwplot_ensembled.png", width=700)
+bwplot(res5, main="Box and Whisker Plots of Performance Metrics for 5 Features (Ensembled)", scales=list(x=list(relation="free"),y=list(relation="free")))
+
+#stacked model using glm with caretStack()
+set.seed(101)
+scontrol <- trainControl(method="repeatedcv", number=10, repeats=3, savePredictions = "final", classProbs = TRUE)
+stacked_mod5 <- caretStack(modls5, method="glm", metric="Accuracy", trControl=scontrol)
+stacked_mod5
+predicted_smod5 <- predict(stacked_mod5, newdata = testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_smod5, mode="everything", positive="BreastCancer")
+ps5 <- predict(stacked_mod5, newdata = testingdata, type="prob")
+
+#repeat same process as above but for 9 attributes
+set.seed(101)
+modls9 <- caretList(Classification~., data=trainingdata, trControl=tcontrol, methodList=mlalgorithms)
+res9 <- resamples(modls9)
+summary(res9)
+png("bwplot_ensembled2.png", width=700)
+bwplot(res9, main="Box and Whisker Plots of Performance Metrics for 9 Features (Ensembled)", scales=list(x=list(relation="free"),y=list(relation="free")))
+
+set.seed(101)
+stacked_mod9 <- caretStack(modls9, method="glm", metric="Accuracy", trControl=scontrol)
+stacked_mod9
+predicted_smod9 <- predict(stacked_mod9, newdata = testingdata)
+confusionMatrix(reference=testingdata$Classification, data=predicted_smod9, mode="everything", positive="BreastCancer")
+ps9 <- predict(stacked_mod9, newdata = testingdata, type="prob")
+
+png("stacked_roc.png")
+roc.s5<-roc(testingdata$Classification~ps5)
+roc.s9 <- roc(testingdata$Classification~ps9)
+plot(roc.s5, col=1,cex.axis=1.3, main="ROC Curves for Stacked Model")
+plot(roc.s9,col=2, add=T)
+legend('bottomright', c("5 Features", "9 Features" ),col=1:2,lty=1, lwd=1.5,bty='n')
+```
+
