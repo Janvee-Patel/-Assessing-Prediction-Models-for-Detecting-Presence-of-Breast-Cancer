@@ -23,7 +23,9 @@ Data was supplied by the UCI Machine Learning Repository
 
 Data and Project Background: 
 
-Patricio et al. (2018) implemented 3 machine learning algorithms to assess the efficacy of routine blood measurements to be used as potential biomarkers for additional breast cancer screening. In this project, the goals are to perform exploratory data analysis of the features, feature selection, implement five machine learning algorithms, assess model performances with AUC/ROC, sensitivity, specificity, and assess performance of a stacked model using the CARET R package (Classification and Regression Training).
+Patricio et al. (2018) implemented 3 machine learning algorithms to assess the efficacy of routine blood measurements to be used as potential biomarkers for additional breast 
+cancer screening. In this project, the goals are to perform exploratory data analysis of the features, feature selection, implement five machine learning algorithms, assess
+model performances with AUC/ROC, sensitivity, specificity, and assess performance of a stacked model using the CARET R package (Classification and Regression Training).
 
 
 # Exploratory Data Analysis and Visualization of Variables
