@@ -17,3 +17,5 @@ https://doi.org/10.1007/s12020-016-0893-x
 Data was supplied by UCI Machine Learning Repository
 
 # Repository Contents
+
+PredictionModels_BreastCa_Comibra.Rmd: R Markdown file containing code for performing exploratory data analysis of the features, feature selection with recursive feature elimination, and implementing five machine learning algorithms (Random Forest, Support Vector Machine, Logistic Regression, K-Nearest Neighbors, and Adaptive Boosting) using the top 5 features from feature selection and all 9 features. In addition, the file contains code for assessing model performances with 
